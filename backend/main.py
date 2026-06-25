@@ -10,11 +10,11 @@ from dotenv import load_dotenv, find_dotenv
 from backend.config import settings
 from backend.models import (
     ChatRequest, FileRetrievalRequest, FileRetrievalResponse,
-    KnowledgeBaseInfo, HealthResponse
+    KnowledgeBaseInfo, HealthResponse, SummaryRetrievalRequest
 )
 from backend.knowledge_base import knowledge_base
 from backend.llm_provider import LLMProvider
-from backend.prompts import create_system_prompt, create_file_retrieval_tool, create_react_system_prompt
+from backend.prompts import create_system_prompt, create_file_retrieval_tool, create_react_system_prompt, create_summary_browsing_tool
 from backend.react_handler import handle_react_mode
 
 app = FastAPI(
@@ -108,13 +108,13 @@ async def get_knowledge_base_info():
 async def get_system_prompt():
     """Return the system prompt currently in use"""
     try:
-        file_summary = await knowledge_base.get_file_summary()
-        
+        root_summary = await knowledge_base.get_root_summary()
+
         # Return corresponding system prompt based on configuration
         if settings.tool_calling_mode == "react":
-            system_prompt = create_react_system_prompt(file_summary)
+            system_prompt = create_react_system_prompt(root_summary)
         else:
-            system_prompt = create_system_prompt(file_summary)
+            system_prompt = create_system_prompt(root_summary)
         
         return {
             "system_prompt": system_prompt,
@@ -126,7 +126,19 @@ async def get_system_prompt():
 @app.post("/knowledge-base/retrieve", response_model=FileRetrievalResponse)
 async def retrieve_files(request: FileRetrievalRequest):
     try:
-        content = await knowledge_base.retrieve_files(request.file_paths)
+        content = await knowledge_base.retrieve_files(
+            request.file_paths,
+            query=request.query,
+            top_k=request.top_k,
+        )
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/knowledge-base/summary")
+async def retrieve_summary(request: SummaryRetrievalRequest):
+    try:
+        content = await knowledge_base.retrieve_summary(request.path, request.depth)
         return {"content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,15 +148,15 @@ async def chat(request: ChatRequest):
     try:
         provider = LLMProvider(provider=request.provider or settings.api_provider)
         
-        file_summary = await knowledge_base.get_file_summary()
-        
+        root_summary = await knowledge_base.get_root_summary()
+
         # Check whether to use function calling or ReAct mode
         use_react = settings.tool_calling_mode == "react"
-        
+
         if use_react:
-            system_prompt = create_react_system_prompt(file_summary)
+            system_prompt = create_react_system_prompt(root_summary)
         else:
-            system_prompt = create_system_prompt(file_summary)
+            system_prompt = create_system_prompt(root_summary)
         
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend([msg.dict() for msg in request.messages])
@@ -164,10 +176,18 @@ async def chat(request: ChatRequest):
                 }
             )
         
-        tools = [create_file_retrieval_tool()]
+        tools = [create_summary_browsing_tool(), create_file_retrieval_tool()]
         
         async def generate_response() -> AsyncIterator[str]:
             conversation_messages = messages.copy()
+            last_user_query = next(
+                (
+                    msg.get("content", "")
+                    for msg in reversed(conversation_messages)
+                    if msg.get("role") == "user"
+                ),
+                "",
+            )
             max_iterations = 10
             iteration = 0
             has_content = False
@@ -219,7 +239,10 @@ async def chat(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'tool_calls', 'tool_calls': [accumulated_tool_call]})}\n\n"
                     
                     from backend.prompts import process_tool_calls
-                    tool_results = await process_tool_calls([accumulated_tool_call])
+                    tool_results = await process_tool_calls(
+                        [accumulated_tool_call],
+                        user_query=last_user_query,
+                    )
                     
                     yield f"data: {json.dumps({'type': 'tool_results', 'results': tool_results})}\n\n"
                     

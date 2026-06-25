@@ -51,6 +51,9 @@ frontend/build/
 *.log
 logs/
 
+# Local retrieval/cache artifacts
+.cache/
+
 # Testing
 .coverage
 htmlcov/

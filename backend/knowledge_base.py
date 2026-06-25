@@ -1,12 +1,17 @@
+import json
 import aiofiles
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from backend.config import settings
+from backend.milvus_hybrid import HybridHit, MilvusHybridRetriever, clamp_top_k
 
 class KnowledgeBase:
     def __init__(self, base_path: str = None):
         self.base_path = Path(base_path or settings.knowledge_base_chunks)
         self.summary_file = Path(settings.knowledge_base_file_summary)
+        self.summary_json_path = self.summary_file.parent / "knowledge_summary.json"
+        self._summary_tree: Optional[dict] = None
+        self._hybrid_retriever: Optional[MilvusHybridRetriever] = None
     
     async def get_file_summary(self) -> str:
         """
@@ -28,11 +33,150 @@ class KnowledgeBase:
             f"Expected file path: {self.summary_file}"
         )
     
-    async def retrieve_files(self, file_paths: List[str]) -> str:
+    async def get_summary_tree(self) -> dict:
+        """Load and cache the hierarchical summary tree from knowledge_summary.json."""
+        if self._summary_tree is not None:
+            return self._summary_tree
+        if self.summary_json_path.exists():
+            async with aiofiles.open(self.summary_json_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+            self._summary_tree = json.loads(content)
+            return self._summary_tree
+        return {"path": ".", "type": "root", "summary": "", "children": []}
+
+    async def get_root_summary(self) -> str:
+        """
+        Serialize only the root level (top-level categories) for system prompt injection.
+        Falls back to full summary.txt if the JSON tree is empty (graceful degradation).
+        """
+        tree = await self.get_summary_tree()
+        children = tree.get("children", [])
+        if not children:
+            return await self.get_file_summary()
+
+        lines = []
+        if tree.get("summary"):
+            lines.append(tree["summary"])
+            lines.append("")
+        lines.append("## Categories")
+        for child in children:
+            name = child.get("path", "").split("/")[-1] or child.get("path", "")
+            summary = child.get("summary", "")
+            lines.append(f"- {name}: {summary}")
+        return "\n".join(lines)
+
+    async def retrieve_summary(self, path: str = ".", depth: int = 1) -> str:
+        """
+        Return summaries of children under `path`, expanded up to `depth` levels.
+        Lets the LLM drill into the hierarchy without loading full file contents.
+        """
+        tree = await self.get_summary_tree()
+        if not tree.get("children"):
+            return "Summary tree not available. Run Knowledge-Base-File-Summary/generate.py first."
+
+        node = self._find_node(tree, path)
+        if node is None:
+            return f"Path not found: {path}"
+
+        lines = []
+        if node.get("type") == "file":
+            name = node.get("path", "").split("/")[-1] or node.get("path", "")
+            lines.append(f"📄 {name}: {node.get('summary', '')}")
+            chunks = node.get("chunks")
+            if chunks:
+                for chunk in chunks:
+                    start = chunk.get("start", "?")
+                    end = chunk.get("end", "?")
+                    lines.append(f"  ├─ {start}-{end}: {chunk.get('summary', '')}")
+        else:
+            self._render_summary_subtree(node, depth, lines, indent="")
+
+        result = "\n".join(lines)
+        # Soft token cap (~4 chars/token) to guard against pathological large directories
+        max_chars = 16000
+        if len(result) > max_chars:
+            result = result[:max_chars] + "\n\n[... truncated to fit token budget]"
+        return result
+
+    def _find_node(self, tree: dict, path: str) -> Optional[dict]:
+        """Locate a node by its `path` field. '.', '' or '/' matches root."""
+        path = (path or ".").strip()
+        if path in (".", "", "/"):
+            return tree
+        stack = [tree]
+        while stack:
+            current = stack.pop()
+            if current.get("path") == path:
+                return current
+            for child in current.get("children", []):
+                stack.append(child)
+        return None
+
+    def _render_summary_subtree(self, node: dict, depth: int, lines: list, indent: str):
+        """Render a node's children summaries recursively up to `depth` levels."""
+        if depth <= 0:
+            return
+        for child in node.get("children", []):
+            ctype = child.get("type", "")
+            cname = child.get("path", "").split("/")[-1] or child.get("path", "")
+            csum = child.get("summary", "")
+            if ctype == "dir":
+                lines.append(f"{indent}📁 {cname}: {csum}")
+                if depth > 1:
+                    self._render_summary_subtree(child, depth - 1, lines, indent + "  ")
+            elif ctype == "file":
+                lines.append(f"{indent}📄 {cname}: {csum}")
+                chunks = child.get("chunks")
+                if chunks and depth > 1:
+                    for chunk in chunks:
+                        start = chunk.get("start", "?")
+                        end = chunk.get("end", "?")
+                        lines.append(f"{indent}  ├─ {start}-{end}: {chunk.get('summary', '')}")
+
+    async def retrieve_files(
+        self,
+        file_paths: List[str],
+        query: Optional[str] = None,
+        top_k: Optional[int] = None,
+    ) -> str:
+        if settings.retrieval_backend == "milvus_hybrid" and (query or "").strip():
+            return await self._retrieve_files_with_hybrid(file_paths, query, top_k)
+
+        return await self._retrieve_files_direct(file_paths)
+
+    async def _retrieve_files_with_hybrid(
+        self,
+        file_paths: List[str],
+        query: str,
+        top_k: Optional[int],
+    ) -> str:
+        if not self.base_path.exists():
+            raise RuntimeError(f"Knowledge base chunks path not found: {self.base_path}")
+
+        retriever = self._get_hybrid_retriever()
+        hits = await retriever.search(query=query, file_paths=file_paths, top_k=top_k)
+        if not hits:
+            scope = ", ".join(file_paths or ["<all knowledge base>"])
+            return f"No Milvus hybrid retrieval results found for query: {query}\nScope: {scope}"
+
+        metadata = self._format_hybrid_hit_summary(hits, query, clamp_top_k(top_k))
         results = []
+
+        for hit in hits:
+            full_path = self._resolve_path(hit.path)
+            content = await self._read_file(full_path)
+            results.append(f"《{hit.path}》\n\n{content}")
+
+        final_content = "\n\n==========\n\n".join(results)
+        print(f"[DEBUG] Hybrid content length: {len(final_content)}, files: {len(results)}")
+        return f"{metadata}\n\n==========\n\n{final_content}"
+
+    async def _retrieve_files_direct(self, file_paths: List[str]) -> str:
+        results = []
+        base_resolved = self.base_path.resolve()
         
-        for file_path in file_paths:
-            full_path = self.base_path / file_path.lstrip('/')
+        for file_path in file_paths or []:
+            full_path = self._resolve_path(file_path)
             
             if full_path.is_dir():
                 print(f"[DEBUG] Retrieving directory: {file_path}")
@@ -40,26 +184,71 @@ class KnowledgeBase:
                 print(f"[DEBUG] Found {len(md_files)} files in {file_path}")
                 for md_file in md_files:
                     content = await self._read_file(md_file)
-                    relative_path = md_file.relative_to(self.base_path)
+                    relative_path = md_file.resolve().relative_to(base_resolved).as_posix()
                     results.append(f"《{relative_path}》\n\n{content}")
                     print(f"[DEBUG] Added file: {relative_path}, length: {len(content)}")
             
             elif full_path.is_file():
                 print(f"[DEBUG] Retrieving file: {file_path}")
                 content = await self._read_file(full_path)
-                results.append(f"《{file_path}》\n\n{content}")
+                relative_path = full_path.resolve().relative_to(base_resolved).as_posix()
+                results.append(f"《{relative_path}》\n\n{content}")
                 print(f"[DEBUG] File length: {len(content)}")
             
             elif file_path == "/":
                 print(f"[DEBUG] Retrieving all files")
                 for md_file in self.base_path.rglob("*.md"):
                     content = await self._read_file(md_file)
-                    relative_path = md_file.relative_to(self.base_path)
+                    relative_path = md_file.resolve().relative_to(base_resolved).as_posix()
                     results.append(f"《{relative_path}》\n\n{content}")
         
+        if not results:
+            requested = ", ".join(file_paths or [])
+            return f"No files found for requested paths: {requested or '<empty>'}"
+
         final_content = "\n\n==========\n\n".join(results)
         print(f"[DEBUG] Total content length: {len(final_content)}, files: {len(results)}")
         return final_content
+
+    def _get_hybrid_retriever(self) -> MilvusHybridRetriever:
+        if self._hybrid_retriever is None:
+            self._hybrid_retriever = MilvusHybridRetriever()
+        return self._hybrid_retriever
+
+    def _resolve_path(self, file_path: str) -> Path:
+        if file_path == "/":
+            return self.base_path.resolve()
+
+        relative = (file_path or "").strip().replace("\\", "/").lstrip("/")
+        candidate = (self.base_path / relative).resolve()
+        base = self.base_path.resolve()
+
+        if candidate != base and base not in candidate.parents:
+            raise ValueError(f"Illegal knowledge base path: {file_path}")
+
+        return candidate
+
+    def _format_hybrid_hit_summary(
+        self,
+        hits: List[HybridHit],
+        query: str,
+        top_k: int,
+    ) -> str:
+        lines = [
+            "## Hybrid Retrieval Results",
+            f"- query: {query}",
+            f"- top_k: {top_k}",
+            "- backend: milvus_hybrid",
+            "",
+            "| rank | score | path | source_path |",
+            "|---:|---:|---|---|",
+        ]
+
+        for hit in hits:
+            score = f"{hit.score:.6f}" if hit.score is not None else "n/a"
+            lines.append(f"| {hit.rank} | {score} | {hit.path} | {hit.source_path} |")
+
+        return "\n".join(lines)
     
     async def _read_file(self, file_path: Path) -> str:
         try:

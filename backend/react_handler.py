@@ -6,6 +6,14 @@ async def handle_react_mode(provider, messages, max_iterations=5) -> AsyncIterat
     """Handle ReAct-style tool calling for LLMs without function calling support"""
     
     conversation_messages = messages.copy()
+    last_user_query = next(
+        (
+            msg.get("content", "")
+            for msg in reversed(conversation_messages)
+            if msg.get("role") == "user"
+        ),
+        "",
+    )
     iteration = 0
     
     while iteration < max_iterations:
@@ -27,7 +35,10 @@ async def handle_react_mode(provider, messages, max_iterations=5) -> AsyncIterat
                     accumulated_response += content
                     
                     if "<|Action Input|>" in accumulated_response and "{" in accumulated_response:
-                        action_result, has_action = await process_react_response(accumulated_response)
+                        action_result, has_action = await process_react_response(
+                            accumulated_response,
+                            user_query=last_user_query,
+                        )
                         if has_action:
                             action_detected = True
                             yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
@@ -40,7 +51,10 @@ async def handle_react_mode(provider, messages, max_iterations=5) -> AsyncIterat
         
         # Check if response contains action
         if not action_detected:
-            action_result, has_action = await process_react_response(accumulated_response)
+            action_result, has_action = await process_react_response(
+                accumulated_response,
+                user_query=last_user_query,
+            )
         else:
             has_action = True
         

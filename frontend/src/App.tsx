@@ -15,7 +15,7 @@ function App() {
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
-  const [providers, setProviders] = useState<Provider[]>([]);
+  const [, setProviders] = useState<Provider[]>([]);
   const [messageToolCalls, setMessageToolCalls] = useState<Map<number, any[]>>(new Map());
   const [messageToolResults, setMessageToolResults] = useState<Map<number, any[]>>(new Map());
   

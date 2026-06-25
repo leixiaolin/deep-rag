@@ -7,5 +7,7 @@ aiofiles==23.2.1
 httpx==0.26.0
 openai==1.10.0
 anthropic==0.18.0
-google-generativeai==0.3.2
-python-dotenv==1.0.0
+google-generativeai>=0.8.6,<0.9.0
+python-dotenv>=1.0.1,<2.0.0
+pymilvus>=3.0.0,<4.0.0
+milvus-lite>=3.0,<4.0

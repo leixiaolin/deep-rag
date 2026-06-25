@@ -42,9 +42,15 @@ export const chatApi = {
     return response.data;
   },
 
-  retrieveFiles: async (filePaths: string[]): Promise<{ content: string }> => {
+  retrieveFiles: async (
+    filePaths: string[],
+    query?: string,
+    topK?: number
+  ): Promise<{ content: string }> => {
     const response = await api.post('/knowledge-base/retrieve', {
       file_paths: filePaths,
+      query,
+      top_k: topK,
     });
     return response.data;
   },

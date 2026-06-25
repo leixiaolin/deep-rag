@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python Knowledge-Base-File-Summary/generate.py)",
+      "Bash(grep -E '\\\\.env$')"
+    ]
+  }
+}

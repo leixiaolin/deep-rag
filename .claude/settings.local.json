@@ -12,10 +12,24 @@
       "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('/c/Users/lxl/AppData/Roaming/Code/User/settings.json','utf8'\\)\\); console.log\\('settings.json OK'\\)\")",
       "Bash(node -e \"const p=process.env.USERPROFILE+'\\\\\\\\\\\\\\\\AppData\\\\\\\\\\\\\\\\Roaming\\\\\\\\\\\\\\\\Code\\\\\\\\\\\\\\\\User\\\\\\\\\\\\\\\\settings.json';JSON.parse\\(require\\('fs'\\).readFileSync\\(p,'utf8'\\)\\);console.log\\('settings.json OK'\\)\")",
       "Bash(node -e \"const p=process.env.USERPROFILE.replace\\(/\\\\\\\\\\\\\\\\/g,'/'\\)+'/AppData/Roaming/Code/User/settings.json';JSON.parse\\(require\\('fs'\\).readFileSync\\(p,'utf8'\\)\\);console.log\\('settings.json OK ->',p\\)\")",
-      "Bash(python -c \"import json,os; p=os.path.join\\(os.environ['USERPROFILE'],'AppData','Roaming','Code','User','settings.json'\\); json.load\\(open\\(p,encoding='utf-8'\\)\\); print\\('settings.json OK'\\)\")"
+      "Bash(python -c \"import json,os; p=os.path.join\\(os.environ['USERPROFILE'],'AppData','Roaming','Code','User','settings.json'\\); json.load\\(open\\(p,encoding='utf-8'\\)\\); print\\('settings.json OK'\\)\")",
+      "Bash(git commit -m ':*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(wc -l \"e:/cursor_workspace/deep-rag/Knowledge-Base\"/*/*.md)",
+      "Read(//c/Users/lxl/.claude/plans/**)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('Knowledge-Base-File-Summary/generate.py',encoding='utf-8'\\).read\\(\\)\\); print\\('generate.py syntax OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/knowledge_base.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('backend/models.py',encoding='utf-8'\\).read\\(\\)\\); print\\('knowledge_base.py + models.py syntax OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/prompts.py',encoding='utf-8'\\).read\\(\\)\\); print\\('prompts.py syntax OK'\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) for f in ['backend/main.py','backend/prompts.py','backend/knowledge_base.py','backend/models.py','Knowledge-Base-File-Summary/generate.py']]; print\\('all 5 files syntax OK'\\)\")",
+      "Bash(python _verify_tmp.py)",
+      "Bash(python _verify_tmp2.py)",
+      "Bash(python generate.py)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\lxl\\AppData\\Roaming\\Code\\User"
+      "C:\\Users\\lxl\\AppData\\Roaming\\Code\\User",
+      "E:\\cursor_workspace\\deep-rag\\.git",
+      "C:\\Users\\lxl\\.claude\\plans"
     ]
   }
 }
