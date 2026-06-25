@@ -23,6 +23,16 @@ venv/
 env/
 ENV/
 
+# Knowledge Base（生成的切片 / 索引数据，不入库）
+Knowledge-Base/
+Knowledge-Base-Chunks/
+Knowledge-Base-File-Summary/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
 # Frontend
 node_modules/
 frontend/dist/

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /e/cursor_workspace/deep-rag/Knowledge-Base-Chunks -type f -name \"*.md\" -exec wc -l {} +)",
+      "Bash(grep \"\\\\.md$\")",
+      "Read(//c/Users/lxl/AppData/Roaming/Code/User/**)",
+      "Bash(code --list-extensions)",
+      "Bash(xargs ls:*)",
+      "Bash(sort -k5 -n -r)",
+      "Read(//e/cursor_workspace/deep-rag/**)",
+      "Bash(code --list-extensions --show-versions)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('/c/Users/lxl/AppData/Roaming/Code/User/settings.json','utf8'\\)\\); console.log\\('settings.json OK'\\)\")",
+      "Bash(node -e \"const p=process.env.USERPROFILE+'\\\\\\\\\\\\\\\\AppData\\\\\\\\\\\\\\\\Roaming\\\\\\\\\\\\\\\\Code\\\\\\\\\\\\\\\\User\\\\\\\\\\\\\\\\settings.json';JSON.parse\\(require\\('fs'\\).readFileSync\\(p,'utf8'\\)\\);console.log\\('settings.json OK'\\)\")",
+      "Bash(node -e \"const p=process.env.USERPROFILE.replace\\(/\\\\\\\\\\\\\\\\/g,'/'\\)+'/AppData/Roaming/Code/User/settings.json';JSON.parse\\(require\\('fs'\\).readFileSync\\(p,'utf8'\\)\\);console.log\\('settings.json OK ->',p\\)\")",
+      "Bash(python -c \"import json,os; p=os.path.join\\(os.environ['USERPROFILE'],'AppData','Roaming','Code','User','settings.json'\\); json.load\\(open\\(p,encoding='utf-8'\\)\\); print\\('settings.json OK'\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\lxl\\AppData\\Roaming\\Code\\User"
+    ]
+  }
+}
