@@ -4,6 +4,7 @@ import math
 import re
 import httpx
 
+from backend.cache import cache, text_hash
 from backend.config import settings
 
 
@@ -20,6 +21,47 @@ class EmbeddingProvider:
 
         if self.provider and self.provider.lower() in {"local", "local_hash", "hash"}:
             return [self._local_hash_embedding(text) for text in texts]
+
+        keys = [
+            await cache.make_key(
+                "embedding",
+                {
+                    "kind": "embedding",
+                    "provider": self.provider,
+                    "base_url": self.config.get("base_url", ""),
+                    "model": self.config.get("model", ""),
+                    "dim": settings.embedding_dim,
+                    "text_hash": text_hash(text),
+                },
+            )
+            for text in texts
+        ]
+
+        results: List[List[float]] = [None] * len(texts)
+        misses = []
+
+        for index, key in enumerate(keys):
+            cached = await cache.get_json(key)
+            if cached is None:
+                misses.append((index, key, texts[index]))
+            else:
+                results[index] = cached
+
+        if misses:
+            vectors = await self._request_embeddings([text for _, _, text in misses])
+            for (index, key, _), vector in zip(misses, vectors):
+                results[index] = vector
+                await cache.set_json(
+                    key,
+                    vector,
+                    settings.cache_embedding_ttl_seconds,
+                )
+
+        return results
+
+    async def _request_embeddings(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
 
         base_url = self.config.get("base_url", "")
         model = self.config.get("model", "")

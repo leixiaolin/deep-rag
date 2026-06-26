@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 class Message(BaseModel):
     role: str
@@ -46,3 +46,6 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     providers: List[str]
+
+class CacheInvalidateRequest(BaseModel):
+    scope: Literal["all", "summary", "file", "file_tree", "embedding", "hybrid_search"] = "all"

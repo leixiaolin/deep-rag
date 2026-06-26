@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     hybrid_ranker: str = Field(default="rrf")
     hybrid_dense_weight: float = Field(default=0.3)
     hybrid_sparse_weight: float = Field(default=0.7)
+    cache_enabled: bool = Field(default=True)
+    cache_backend: str = Field(default="memory")
+    cache_redis_url: str = Field(default="redis://localhost:6379/0")
+    cache_key_prefix: str = Field(default="deep-rag")
+    cache_default_ttl_seconds: int = Field(default=300)
+    cache_summary_ttl_seconds: int = Field(default=3600)
+    cache_file_ttl_seconds: int = Field(default=3600)
+    cache_embedding_ttl_seconds: int = Field(default=2592000)
+    cache_hybrid_search_ttl_seconds: int = Field(default=600)
+    cache_max_memory_items: int = Field(default=2048)
+    cache_lock_ttl_seconds: int = Field(default=30)
+    cache_lock_wait_seconds: float = Field(default=2.0)
+    cache_admin_token: str = Field(default="")
 
     class Config:
         env_file = ".env"

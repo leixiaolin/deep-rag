@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
@@ -10,8 +10,10 @@ from dotenv import load_dotenv, find_dotenv
 from backend.config import settings
 from backend.models import (
     ChatRequest, FileRetrievalRequest, FileRetrievalResponse,
-    KnowledgeBaseInfo, HealthResponse, SummaryRetrievalRequest
+    KnowledgeBaseInfo, HealthResponse, SummaryRetrievalRequest,
+    CacheInvalidateRequest
 )
+from backend.cache import cache
 from backend.knowledge_base import knowledge_base
 from backend.llm_provider import LLMProvider
 from backend.prompts import create_system_prompt, create_file_retrieval_tool, create_react_system_prompt, create_summary_browsing_tool
@@ -52,6 +54,23 @@ async def get_config():
         "default_model": config.get("model", "")
     }
 
+@app.get("/cache/stats")
+async def get_cache_stats():
+    """Return cache health and hit/miss counters for operations."""
+    return await cache.stats()
+
+@app.post("/cache/invalidate")
+async def invalidate_cache(
+    request: CacheInvalidateRequest,
+    x_admin_token: str = Header(default=""),
+):
+    """Bump cache namespace versions without deleting old entries."""
+    if not settings.cache_admin_token or x_admin_token != settings.cache_admin_token:
+        raise HTTPException(status_code=403, detail="Cache invalidation is not authorized")
+
+    await cache.bump_namespace(request.scope)
+    return {"status": "success", "scope": request.scope}
+
 @app.get("/api/config")
 async def get_env_config():
     """Read the original content of .env file"""
@@ -85,8 +104,12 @@ async def update_env_config(request: dict):
         
         # Reinitialize settings object
         global settings
+        import backend.config as config_module
         from backend.config import Settings
-        settings = Settings()
+        config_module.settings = Settings()
+        settings = config_module.settings
+
+        await cache.bump_namespace("all")
         
         return {"status": "success", "message": "Configuration updated successfully!"}
     except Exception as e:
@@ -96,7 +119,7 @@ async def update_env_config(request: dict):
 async def get_knowledge_base_info():
     try:
         summary = await knowledge_base.get_file_summary()
-        file_tree = knowledge_base.list_files()
+        file_tree = await knowledge_base.list_files()
         return {
             "summary": summary,
             "file_tree": file_tree

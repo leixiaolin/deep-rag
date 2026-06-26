@@ -3,10 +3,11 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from backend.cache import cache, normalize_file_paths
 from backend.config import settings
 from backend.embedding_provider import EmbeddingProvider
 
@@ -357,6 +358,9 @@ class MilvusHybridRetriever:
             )
             deleted += len(batch)
 
+        if upserted or deleted:
+            await cache.bump_namespace("hybrid_search")
+
         return {
             "documents": len(documents),
             "upserted": upserted,
@@ -370,7 +374,12 @@ class MilvusHybridRetriever:
         file_paths: Optional[List[str]] = None,
         top_k: Optional[int] = None,
     ) -> List[HybridHit]:
-        return await self._search(query, file_paths=file_paths, top_k=top_k, modes=("dense", "sparse"))
+        return await self._cached_search(
+            query,
+            file_paths=file_paths,
+            top_k=top_k,
+            modes=("dense", "sparse"),
+        )
 
     async def search_dense(
         self,
@@ -378,7 +387,12 @@ class MilvusHybridRetriever:
         file_paths: Optional[List[str]] = None,
         top_k: Optional[int] = None,
     ) -> List[HybridHit]:
-        return await self._search(query, file_paths=file_paths, top_k=top_k, modes=("dense",))
+        return await self._cached_search(
+            query,
+            file_paths=file_paths,
+            top_k=top_k,
+            modes=("dense",),
+        )
 
     async def search_sparse(
         self,
@@ -386,7 +400,73 @@ class MilvusHybridRetriever:
         file_paths: Optional[List[str]] = None,
         top_k: Optional[int] = None,
     ) -> List[HybridHit]:
-        return await self._search(query, file_paths=file_paths, top_k=top_k, modes=("sparse",))
+        return await self._cached_search(
+            query,
+            file_paths=file_paths,
+            top_k=top_k,
+            modes=("sparse",),
+        )
+
+    async def _cached_search(
+        self,
+        query: str,
+        file_paths: Optional[List[str]] = None,
+        top_k: Optional[int] = None,
+        modes: tuple = ("dense", "sparse"),
+    ) -> List[HybridHit]:
+        clean_query = (query or "").strip()
+        if not clean_query:
+            raise ValueError("Milvus hybrid retrieval requires a non-empty query.")
+
+        key = await cache.make_key(
+            "hybrid_search",
+            self._hybrid_cache_payload(clean_query, file_paths, top_k, modes),
+        )
+
+        async def run_search() -> List[Dict]:
+            hits = await self._search(
+                clean_query,
+                file_paths=file_paths,
+                top_k=top_k,
+                modes=modes,
+            )
+            return [asdict(hit) for hit in hits]
+
+        rows = await cache.get_or_set_json(
+            key,
+            settings.cache_hybrid_search_ttl_seconds,
+            run_search,
+        )
+        return [HybridHit(**row) for row in rows]
+
+    def _hybrid_cache_payload(
+        self,
+        query: str,
+        file_paths: Optional[List[str]],
+        top_k: Optional[int],
+        modes: tuple,
+    ) -> Dict:
+        return {
+            "kind": "milvus_hybrid_search",
+            "query": query,
+            "file_paths": normalize_file_paths(file_paths),
+            "top_k": clamp_top_k(top_k),
+            "modes": list(modes),
+            "collection": self.collection_name,
+            "milvus_uri": settings.milvus_uri,
+            "dense_metric_type": settings.milvus_dense_metric_type,
+            "hnsw_ef": settings.milvus_hnsw_ef,
+            "bm25_k1": settings.milvus_bm25_k1,
+            "bm25_b": settings.milvus_bm25_b,
+            "ranker": settings.hybrid_ranker,
+            "rrf_k": settings.hybrid_rrf_k,
+            "dense_weight": settings.hybrid_dense_weight,
+            "sparse_weight": settings.hybrid_sparse_weight,
+            "embedding_provider": self.embedder.provider,
+            "embedding_base_url": self.embedder.config.get("base_url", ""),
+            "embedding_model": self.embedder.config.get("model", ""),
+            "embedding_dim": settings.embedding_dim,
+        }
 
     async def _search(
         self,
